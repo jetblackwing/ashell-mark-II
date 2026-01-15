@@ -23,10 +23,31 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
 #include "shell.h"
 #include "source.h"
 #include "parser.h"
 #include "executor.h"
+
+// History Implementation. Experimental
+char *history[HISTORY_SIZE];
+int history_count = 0;
+
+
+void add_to_history(char *cmd) {
+    char *line = strdup(cmd);
+    if (line[strlen(line)-1] == '\n') {
+        line[strlen(line)-1] = '\0';
+    }
+    if (history_count < HISTORY_SIZE) {
+        history[history_count++] = line;
+    } else {
+        free(history[0]);
+        memmove(history, history + 1, (HISTORY_SIZE - 1) * sizeof(char*));
+        history[HISTORY_SIZE - 1] = line;
+    }
+}
 
 
 int main(int argc, char **argv)
@@ -58,6 +79,7 @@ int main(int argc, char **argv)
         src.bufsize  = strlen(cmd);
         src.curpos   = INIT_SRC_POS;
         parse_and_execute(&src);
+        add_to_history(cmd);
         free(cmd);
     } while(1);
     exit(EXIT_SUCCESS);
@@ -66,48 +88,75 @@ int main(int argc, char **argv)
 
 char *read_cmd(void)
 {
-    char buf[1024];
-    char *ptr = NULL;
-    char ptrlen = 0;
-    while(fgets(buf, 1024, stdin))
-    {
-        int buflen = strlen(buf);
-        if(!ptr)
-        {
-            ptr = malloc(buflen+1);
-        }
-        else
-        {
-            char *ptr2 = realloc(ptr, ptrlen+buflen+1);
-            if(ptr2)
-            {
-                ptr = ptr2;
-            }
-            else
-            {
-                free(ptr);
-                ptr = NULL;
-            }
-        }
-        if(!ptr)
-        {
-            fprintf(stderr, "ashell error: failed to alloc buffer: %s\n", strerror(errno));
+    struct termios orig_termios;
+    tcgetattr(STDIN_FILENO, &orig_termios);
+    struct termios raw = orig_termios;
+    raw.c_lflag &= ~(ECHO | ICANON);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+
+    char buffer[1024];
+    char current_line[1024] = {0};
+    int bufpos = 0;
+    int history_index = history_count;
+
+    while (1) {
+        char c;
+        if (read(STDIN_FILENO, &c, 1) != 1) {
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
             return NULL;
         }
-        strcpy(ptr+ptrlen, buf);
-        if(buf[buflen-1] == '\n')
-        {
-            if(buflen == 1 || buf[buflen-2] != '\\')
-            {
-                return ptr;
+        if (c == '\n') {
+            buffer[bufpos] = '\0';
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+            fprintf(stderr, "\n");
+            char *ret = malloc(bufpos + 2);
+            strcpy(ret, buffer);
+            strcat(ret, "\n");
+            return ret;
+        } else if (c == 127 || c == '\b') { // backspace
+            if (bufpos > 0) {
+                bufpos--;
+                fprintf(stderr, "\b \b");
             }
-            ptr[ptrlen+buflen-2] = '\0';
-            buflen -= 2;
-            print_prompt2();
+        } else if (c == 27) { // escape sequence
+            char seq[2];
+            if (read(STDIN_FILENO, &seq[0], 1) != 1) continue;
+            if (read(STDIN_FILENO, &seq[1], 1) != 1) continue;
+            if (seq[0] == '[') {
+                if (seq[1] == 'A') { // up arrow
+                    if (history_index > 0) {
+                        if (history_index == history_count) {
+                            buffer[bufpos] = '\0';
+                            strcpy(current_line, buffer);
+                        }
+                        history_index--;
+                        // clear current line
+                        for (int i = 0; i < bufpos; i++) fprintf(stderr, "\b \b");
+                        strcpy(buffer, history[history_index]);
+                        bufpos = strlen(buffer);
+                        fprintf(stderr, "%s", buffer);
+                    }
+                } else if (seq[1] == 'B') { // down arrow
+                    if (history_index < history_count) {
+                        history_index++;
+                        for (int i = 0; i < bufpos; i++) fprintf(stderr, "\b \b");
+                        if (history_index == history_count) {
+                            strcpy(buffer, current_line);
+                        } else {
+                            strcpy(buffer, history[history_index]);
+                        }
+                        bufpos = strlen(buffer);
+                        fprintf(stderr, "%s", buffer);
+                    }
+                }
+            }
+        } else if (c >= 32 && c <= 126) { // printable
+            if (bufpos < 1023) {
+                buffer[bufpos++] = c;
+                fprintf(stderr, "%c", c);
+            }
         }
-        ptrlen += buflen;
     }
-    return ptr;
 }
 
 
