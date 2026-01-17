@@ -1,6 +1,6 @@
 # A-Shell
 
-**A-Shell** (short for *Amal-Shell / Advanced-Shell / Aura-Shell — take your pick*) is a continuation of my Linux shell project from my college days.
+**A-Shell** (short for *Amal-Shell / Arun-Shell / Advanced-Shell / Aura-Shell — take your pick*) is a continuation of my Linux shell project from my college days.
 
 I recently came across this old code on one of my hard drives and decided to bring it back to life. Not out of boredom, but because revisiting old projects is a great way to experiment, learn, and productively kill some time while refining low-level concepts.
 This project is a part of my old project named "ESOS" (Extented Support Operating System), which is discontinued due to lack of consistency and time. In the future, I'm planning to build a new, highly-customized OS.

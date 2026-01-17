@@ -30,6 +30,13 @@
 #include "node.h"
 #include "executor.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#define PATHSEP ';'
+#else
+#define PATHSEP ':'
+#endif
+
 
 char *search_path(char *file)
 {
@@ -41,7 +48,7 @@ char *search_path(char *file)
     {
         p2 = p;
 
-        while(*p2 && *p2 != ':')
+        while(*p2 && *p2 != PATHSEP)
         {
             p2++;
         }
@@ -72,7 +79,7 @@ char *search_path(char *file)
             {
                 errno = ENOENT;
                 p = p2;
-                if(*p2 == ':')
+                if(*p2 == PATHSEP)
                 {
                     p++;
                 }
@@ -91,7 +98,7 @@ char *search_path(char *file)
         else    /* file not found */
         {
             p = p2;
-            if(*p2 == ':')
+            if(*p2 == PATHSEP)
             {
                 p++;
             }
@@ -209,6 +216,25 @@ int do_simple_command(struct node_s *node)
         }
     }
 
+#ifdef _WIN32
+    STARTUPINFO si = { sizeof(STARTUPINFO) };
+    PROCESS_INFORMATION pi;
+    char cmdline[4096] = "";
+    for(int i = 0; i < argc; i++) {
+        if(i > 0) strcat(cmdline, " ");
+        strcat(cmdline, argv[i]);
+    }
+    if(!CreateProcess(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        fprintf(stderr, "ashell error: failed to create process\n");
+        free_buffer(argc, argv);
+        return 0;
+    }
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    free_buffer(argc, argv);
+    return 1;
+#else
     pid_t child_pid = 0;
     if((child_pid = fork()) == 0)
     {
@@ -239,4 +265,5 @@ int do_simple_command(struct node_s *node)
     free_buffer(argc, argv);
     
     return 1;
+#endif
 }
