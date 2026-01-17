@@ -23,7 +23,9 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#ifndef _WIN32
 #include <termios.h>
+#endif
 #include <unistd.h>
 #include "shell.h"
 #include "source.h"
@@ -90,6 +92,13 @@ int main(int argc, char **argv)
 
 char *read_cmd(void)
 {
+#ifdef _WIN32
+    char buffer[1024];
+    if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+        return NULL;
+    }
+    return strdup(buffer);
+#else
     struct termios orig_termios;
     tcgetattr(STDIN_FILENO, &orig_termios);
     struct termios raw = orig_termios;
@@ -159,6 +168,7 @@ char *read_cmd(void)
             }
         }
     }
+#endif
 }
 
 
