@@ -1,5 +1,7 @@
 # A-Shell Part 5 - Enhanced Shell Implementation
 
+**Author:** `jetblackwing` (`amaljk80@gmail.com`)
+
 ## Overview
 
 Part 5 is the most advanced version of A-Shell, featuring:
