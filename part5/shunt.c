@@ -25,7 +25,7 @@
  * Retrieved from: http://en.literateprograms.org/Shunting_yard_algorithm_(C)?oldid=12454
  * 
  * 
- * Copyright (c) 2019 Mohammed Isam [mohammed_isam1984@yahoo.com]
+ * Copyright 2026 (c) jetblackwing [amaljk80@gmail.com]
  * 
  * Extensive modifications have been applied to this file to include most of the C
  * language operators and to make this file usable as part of the Layla shell.

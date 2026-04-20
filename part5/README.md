@@ -277,7 +277,7 @@ See the individual source files for copyright information.
 
 ## Resources
 
-- Original tutorial: "Let's Build a Linux Shell" by Mohammed Isam
+- Original tutorial: "Let's Build a Linux Shell" by jetblackwing [amaljk80@gmail.com]
 - Architecture documentation: [ARCHITECTURE.md](../ARCHITECTURE.md)
 - POSIX shell specification: https://pubs.opengroup.org/onlinepubs/9699919799/utilities/sh.html
 

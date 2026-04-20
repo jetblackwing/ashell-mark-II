@@ -1,6 +1,6 @@
 /* 
- *    Programmed By: Mohammed Isam [mohammed_isam1984@yahoo.com]
- *    Copyright 2020 (c)
+ *    Programmed By: jetblackwing [amaljk80@gmail.com]
+ *    Copyright 2026 (c) jetblackwing [amaljk80@gmail.com]
  *    Refactored for safety and maintainability
  * 
  *    file: main.c

@@ -1,6 +1,6 @@
 # 
-#    Copyright 2020 (c)
-#    Mohammed Isam [mohammed_isam1984@yahoo.com]
+#    Copyright 2026 (c) jetblackwing [amaljk80@gmail.com]
+#    jetblackwing [amaljk80@gmail.com]
 # 
 #    file: Makefile
 #    This file is part of the "Let's Build a Linux Shell" tutorial.
