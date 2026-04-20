@@ -27,6 +27,7 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <dirent.h>
 #include "shell.h"
 #include "node.h"
 #include "executor.h"
@@ -112,6 +113,149 @@ char *search_path(const char *file)
 /**
  * Execute a command by finding it in PATH and calling execv
  */
+static int levenshtein_distance_limited(const char *a, const char *b, int max_distance)
+{
+    int len_a = strlen(a);
+    int len_b = strlen(b);
+    if (abs(len_a - len_b) > max_distance) {
+        return max_distance + 1;
+    }
+
+    int *prev = shell_malloc((len_b + 1) * sizeof(int));
+    int *curr = shell_malloc((len_b + 1) * sizeof(int));
+    if (!prev || !curr) {
+        free(prev);
+        free(curr);
+        return max_distance + 1;
+    }
+
+    for (int j = 0; j <= len_b; j++) {
+        prev[j] = j;
+    }
+
+    for (int i = 1; i <= len_a; i++) {
+        curr[0] = i;
+        int min_row = curr[0];
+
+        for (int j = 1; j <= len_b; j++) {
+            int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+            int deletion = prev[j] + 1;
+            int insertion = curr[j - 1] + 1;
+            int substitution = prev[j - 1] + cost;
+            int distance = deletion;
+
+            if (insertion < distance) {
+                distance = insertion;
+            }
+            if (substitution < distance) {
+                distance = substitution;
+            }
+
+            curr[j] = distance;
+            if (distance < min_row) {
+                min_row = distance;
+            }
+        }
+
+        if (min_row > max_distance) {
+            int *tmp = prev;
+            prev = curr;
+            curr = tmp;
+            continue;
+        }
+
+        int *tmp = prev;
+        prev = curr;
+        curr = tmp;
+    }
+
+    int result = prev[len_b];
+    free(prev);
+    free(curr);
+    return result;
+}
+
+
+static char *suggest_closest_command(const char *name)
+{
+    int best_distance = 3;
+    char *best_match = NULL;
+
+    for (int i = 0; i < builtins_count; i++) {
+        int distance = levenshtein_distance_limited(name, builtins[i].name, best_distance);
+        if (distance < best_distance) {
+            free(best_match);
+            best_match = shell_strdup_bounded(builtins[i].name, MAX_INPUT_BUFFER);
+            if (!best_match) {
+                return NULL;
+            }
+            best_distance = distance;
+        }
+    }
+
+    const char *path_env = getenv("PATH");
+    if (!path_env) {
+        return best_match;
+    }
+
+    char *path_copy = shell_strdup_bounded(path_env, MAX_INPUT_BUFFER);
+    if (!path_copy) {
+        return best_match;
+    }
+
+    char *saveptr = NULL;
+    char *dir = strtok_r(path_copy, ":", &saveptr);
+
+    while (dir) {
+        if (*dir == '\0') {
+            dir = ".";
+        }
+
+        DIR *dp = opendir(dir);
+        if (dp) {
+            struct dirent *entry;
+            while ((entry = readdir(dp)) != NULL) {
+                if (entry->d_name[0] == '.') {
+                    continue;
+                }
+
+                int candidate_len = strlen(entry->d_name);
+                if (abs(candidate_len - (int)strlen(name)) > best_distance) {
+                    continue;
+                }
+
+                char fullpath[MAX_PATH_COMPONENT + 1];
+                int len = snprintf(fullpath, sizeof(fullpath), "%s/%s", dir, entry->d_name);
+                if (len < 0 || len >= (int)sizeof(fullpath)) {
+                    continue;
+                }
+
+                if (!is_executable(fullpath)) {
+                    continue;
+                }
+
+                int distance = levenshtein_distance_limited(name, entry->d_name, best_distance);
+                if (distance < best_distance) {
+                    free(best_match);
+                    best_match = shell_strdup_bounded(entry->d_name, MAX_INPUT_BUFFER);
+                    if (!best_match) {
+                        closedir(dp);
+                        free(path_copy);
+                        return NULL;
+                    }
+                    best_distance = distance;
+                }
+            }
+            closedir(dp);
+        }
+        dir = strtok_r(NULL, ":", &saveptr);
+    }
+
+    free(path_copy);
+    return best_match;
+}
+
+
 int do_exec_cmd(int argc, char **argv)
 {
     if (!argv || !argv[0]) {
@@ -128,7 +272,12 @@ int do_exec_cmd(int argc, char **argv)
         /* Search for command in PATH */
         path_to_exec = search_path(argv[0]);
         if (!path_to_exec) {
+            char *suggestion = suggest_closest_command(argv[0]);
             SHELL_ERROR("command not found: %s", argv[0]);
+            if (suggestion) {
+                SHELL_WARN("did you mean: %s", suggestion);
+                free(suggestion);
+            }
             return 0;
         }
         
