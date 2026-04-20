@@ -38,7 +38,7 @@ SRCS_BUILTINS=$(shell find $(SRCDIR)/builtins -name "*.c")
 SRCS_SYMTAB=$(SRCDIR)/symtab/symtab.c
 
 SRCS=main.c prompt.c node.c parser.c scanner.c source.c executor.c initsh.c  \
-     pattern.c strings.c wordexp.c shunt.c                         \
+     pattern.c strings.c wordexp.c shunt.c error.c utils.c cache.c            \
      $(SRCS_BUILTINS) $(SRCS_SYMTAB)
 
 OBJS=$(SRCS:%.c=$(BUILD_DIR)/%.o)

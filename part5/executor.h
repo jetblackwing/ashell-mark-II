@@ -24,8 +24,26 @@
 
 #include "node.h"
 
-char *search_path(char *file);
+/**
+ * Search for a command file in the PATH environment variable
+ * @param file - Command name to search for
+ * @return Full path to executable, or NULL if not found
+ */
+char *search_path(const char *file);
+
+/**
+ * Execute a command after it's been found
+ * @param argc - Argument count
+ * @param argv - Argument vector
+ * @return 0 on error (after exec), or 1 on fork success
+ */
 int do_exec_cmd(int argc, char **argv);
+
+/**
+ * Execute a simple command (possibly with redirections)
+ * @param node - AST node representing the command
+ * @return 1 on success, 0 on failure
+ */
 int do_simple_command(struct node_s *node);
 
 #endif

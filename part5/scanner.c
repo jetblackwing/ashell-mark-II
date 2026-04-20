@@ -1,6 +1,7 @@
 /* 
  *    Programmed By: Mohammed Isam [mohammed_isam1984@yahoo.com]
  *    Copyright 2020 (c)
+ *    Refactored for safety and maintainability
  * 
  *    file: scanner.c
  *    This file is part of the "Let's Build a Linux Shell" tutorial.
@@ -27,54 +28,84 @@
 #include "shell.h"
 #include "scanner.h"
 #include "source.h"
+#include "constants.h"
+#include "error.h"
+#include "utils.h"
 
-char *tok_buf = NULL;
-int   tok_bufsize  = 0;
-int   tok_bufindex = -1;
+/* Global token buffer for reuse across calls */
+static char *tok_buf = NULL;
+static int   tok_bufsize  = 0;
+static int   tok_bufindex = -1;
 
-/* special token to indicate end of input */
+/* Special token to indicate end of input */
 struct token_s eof_token = 
 {
     .text_len = 0,
 };
 
-
-void add_to_buf(char c)
+/**
+ * Add a character to the token buffer, expanding if necessary
+ */
+static void add_to_buf(char c)
 {
+    if (!tok_buf || tok_bufindex >= tok_bufsize) {
+        /* This should not happen if initialized properly */
+        SHELL_ERROR("token buffer overflow");
+        errno = ENOBUFS;
+        return;
+    }
+    
     tok_buf[tok_bufindex++] = c;
 
-    if(tok_bufindex >= tok_bufsize)
-    {
-        char *tmp = realloc(tok_buf, tok_bufsize*2);
-
-        if(!tmp)
-        {
+    /* Expand buffer if we're approaching capacity */
+    if (tok_bufindex >= tok_bufsize - 1) {
+        int newsize = tok_bufsize * 2;
+        
+        /* Prevent excessive growth */
+        if (newsize > MAX_TOKEN_SIZE * 10) {
+            SHELL_ERROR("token too large (max %d bytes)", MAX_TOKEN_SIZE);
+            errno = ENOMEM;
+            return;
+        }
+        
+        char *tmp = shell_realloc(tok_buf, newsize);
+        if (!tmp) {
             errno = ENOMEM;
             return;
         }
 
         tok_buf = tmp;
-        tok_bufsize *= 2;
+        tok_bufsize = newsize;
     }
 }
 
-
-struct token_s *create_token(char *str)
+/**
+ * Create a token structure from a string
+ */
+struct token_s *create_token(const char *str)
 {
-    struct token_s *tok = malloc(sizeof(struct token_s));
+    if (!str) {
+        return NULL;
+    }
     
-    if(!tok)
-    {
+    struct token_s *tok = shell_malloc(sizeof(struct token_s));
+    if (!tok) {
         return NULL;
     }
 
     memset(tok, 0, sizeof(struct token_s));
     tok->text_len = strlen(str);
     
-    char *nstr = malloc(tok->text_len+1);
+    /* Prevent excessively long tokens */
+    if (tok->text_len > MAX_TOKEN_SIZE) {
+        SHELL_ERROR("token too large (%d bytes, max %d)", tok->text_len, MAX_TOKEN_SIZE);
+        free(tok);
+        errno = ENOMEM;
+        return NULL;
+    }
     
-    if(!nstr)
-    {
+    char *nstr = shell_malloc(tok->text_len + 1);
+    if (!nstr) {
         free(tok);
         return NULL;
     }
@@ -85,11 +116,16 @@ struct token_s *create_token(char *str)
     return tok;
 }
 
-
+/**
+ * Free a token structure
+ */
 void free_token(struct token_s *tok)
 {
-    if(tok->text)
-    {
+    if (!tok) {
+        return;
+    }
+    
+    if (tok->text) {
         free(tok->text);
     }
     free(tok);
@@ -108,8 +144,8 @@ struct token_s *tokenize(struct source_s *src)
     
     if(!tok_buf)
     {
-        tok_bufsize = 1024;
-        tok_buf = malloc(tok_bufsize);
+        tok_bufsize = INITIAL_TOK_BUFFER;
+        tok_buf = shell_malloc(tok_bufsize);
         if(!tok_buf)
         {
             errno = ENOMEM;

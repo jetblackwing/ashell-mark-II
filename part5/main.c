@@ -1,6 +1,7 @@
 /* 
  *    Programmed By: Mohammed Isam [mohammed_isam1984@yahoo.com]
  *    Copyright 2020 (c)
+ *    Refactored for safety and maintainability
  * 
  *    file: main.c
  *    This file is part of the "Let's Build a Linux Shell" tutorial.
@@ -31,32 +32,65 @@
 #include "source.h"
 #include "parser.h"
 #include "executor.h"
+#include "constants.h"
+#include "error.h"
+#include "utils.h"
 
-#define HISTORY_SIZE 100
+/* Global history buffer */
+static char *history[MAX_HISTORY_SIZE];
+static int history_count = 0;
 
-// History Implementation. Experimental
-char *history[HISTORY_SIZE];
-int history_count = 0;
-
-
-void add_to_history(char *cmd) {
-    char *line = strdup(cmd);
-    if (line[strlen(line)-1] == '\n') {
-        line[strlen(line)-1] = '\0';
+/**
+ * Add a command to the history buffer
+ */
+static void add_to_history(const char *cmd) 
+{
+    if (!cmd || !*cmd) {
+        return;
     }
-    if (history_count < HISTORY_SIZE) {
+    
+    char *line = shell_strdup_bounded(cmd, MAX_INPUT_BUFFER);
+    if (!line) {
+        return;
+    }
+    
+    /* Remove trailing newline */
+    size_t len = strlen(line);
+    if (len > 0 && line[len - 1] == '\n') {
+        line[len - 1] = '\0';
+    }
+    
+    if (history_count < MAX_HISTORY_SIZE) {
         history[history_count++] = line;
     } else {
+        /* Circular buffer: free oldest and shift */
         free(history[0]);
-        memmove(history, history + 1, (HISTORY_SIZE - 1) * sizeof(char*));
-        history[HISTORY_SIZE - 1] = line;
+        memmove(history, history + 1, (MAX_HISTORY_SIZE - 1) * sizeof(char*));
+        history[MAX_HISTORY_SIZE - 1] = line;
     }
+}
+
+/**
+ * Cleanup history on exit
+ */
+static void cleanup_history(void)
+{
+    for (int i = 0; i < history_count; i++) {
+        if (history[i]) {
+            free(history[i]);
+            history[i] = NULL;
+        }
+    }
+    history_count = 0;
 }
 
 
 int main(int argc, char **argv)
 {
     char *cmd;
+
+    /* Register cleanup handler */
+    atexit(cleanup_history);
 
     initsh();
     
@@ -78,7 +112,7 @@ int main(int argc, char **argv)
             free(cmd);
             break;
         }
-	struct source_s src;
+        struct source_s src;
         src.buffer   = cmd;
         src.bufsize  = strlen(cmd);
         src.curpos   = INIT_SRC_POS;
@@ -86,18 +120,23 @@ int main(int argc, char **argv)
         add_to_history(cmd);
         free(cmd);
     } while(1);
+    
     exit(EXIT_SUCCESS);
 }
 
 
+/**
+ * Read a command from standard input
+ * Uses platform-specific implementations for better terminal control
+ */
 char *read_cmd(void)
 {
 #ifdef _WIN32
-    char buffer[1024];
+    char buffer[MAX_INPUT_BUFFER];
     if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
         return NULL;
     }
-    return strdup(buffer);
+    return shell_strdup_bounded(buffer, MAX_INPUT_BUFFER);
 #else
     struct termios orig_termios;
     tcgetattr(STDIN_FILENO, &orig_termios);
@@ -105,8 +144,8 @@ char *read_cmd(void)
     raw.c_lflag &= ~(ECHO | ICANON);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 
-    char buffer[1024];
-    char current_line[1024] = {0};
+    char buffer[MAX_INPUT_BUFFER];
+    char current_line[MAX_INPUT_BUFFER] = {0};
     int bufpos = 0;
     int history_index = history_count;
 
@@ -116,55 +155,87 @@ char *read_cmd(void)
             tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
             return NULL;
         }
+        
+        /* Newline - end of command */
         if (c == '\n') {
             buffer[bufpos] = '\0';
             tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
             fprintf(stderr, "\n");
-            char *ret = malloc(bufpos + 2);
-            strcpy(ret, buffer);
-            strcat(ret, "\n");
+            
+            /* Create return string with newline */
+            char *ret = shell_malloc(bufpos + 2);
+            if (ret) {
+                strcpy(ret, buffer);
+                strcat(ret, "\n");
+            }
             return ret;
-        } else if (c == 127 || c == '\b') { // backspace
+        }
+        
+        /* Backspace handling */
+        else if (c == 127 || c == '\b') {
             if (bufpos > 0) {
                 bufpos--;
                 fprintf(stderr, "\b \b");
             }
-        } else if (c == 27) { // escape sequence
+        }
+        
+        /* Escape sequence handling (arrow keys, etc.) */
+        else if (c == 27) {
             char seq[2];
             if (read(STDIN_FILENO, &seq[0], 1) != 1) continue;
             if (read(STDIN_FILENO, &seq[1], 1) != 1) continue;
+            
             if (seq[0] == '[') {
-                if (seq[1] == 'A') { // up arrow
+                /* Up arrow - navigate to previous history entry */
+                if (seq[1] == 'A') {
                     if (history_index > 0) {
                         if (history_index == history_count) {
                             buffer[bufpos] = '\0';
-                            strcpy(current_line, buffer);
+                            shell_strlcpy(current_line, buffer, sizeof(current_line));
                         }
                         history_index--;
-                        // clear current line
-                        for (int i = 0; i < bufpos; i++) fprintf(stderr, "\b \b");
-                        strcpy(buffer, history[history_index]);
+                        
+                        /* Clear current line on display */
+                        for (int i = 0; i < bufpos; i++) {
+                            fprintf(stderr, "\b \b");
+                        }
+                        
+                        /* Copy history entry to buffer */
+                        shell_strlcpy(buffer, history[history_index], sizeof(buffer));
                         bufpos = strlen(buffer);
                         fprintf(stderr, "%s", buffer);
                     }
-                } else if (seq[1] == 'B') { // down arrow
+                }
+                /* Down arrow - navigate to next history entry */
+                else if (seq[1] == 'B') {
                     if (history_index < history_count) {
                         history_index++;
-                        for (int i = 0; i < bufpos; i++) fprintf(stderr, "\b \b");
+                        
+                        /* Clear current line on display */
+                        for (int i = 0; i < bufpos; i++) {
+                            fprintf(stderr, "\b \b");
+                        }
+                        
+                        /* Show history entry or restore current line */
                         if (history_index == history_count) {
-                            strcpy(buffer, current_line);
+                            shell_strlcpy(buffer, current_line, sizeof(buffer));
                         } else {
-                            strcpy(buffer, history[history_index]);
+                            shell_strlcpy(buffer, history[history_index], sizeof(buffer));
                         }
                         bufpos = strlen(buffer);
                         fprintf(stderr, "%s", buffer);
                     }
                 }
             }
-        } else if (c >= 32 && c <= 126) { // printable
-            if (bufpos < 1023) {
+        }
+        
+        /* Regular printable character */
+        else if (c >= 32 && c <= 126) {
+            if (bufpos < (int)sizeof(buffer) - 1) {
                 buffer[bufpos++] = c;
                 fprintf(stderr, "%c", c);
+            } else {
+                SHELL_WARN("command line too long");
             }
         }
     }

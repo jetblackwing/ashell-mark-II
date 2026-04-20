@@ -1,6 +1,7 @@
 /* 
  *    Programmed By: Mohammed Isam Mohammed [mohammed_isam1984@yahoo.com]
  *    Copyright 2020 (c)
+ *    Updated with additional builtins
  * 
  *    file: builtins.c
  *    This file is part of the "Let's Build a Linux Shell" tutorial.
@@ -20,10 +21,17 @@
  */    
 
 #include "../shell.h"
+#include "shell_builtins.h"
 
 struct builtin_s builtins[] =
 {
-    { "dump"    , dump       },
+    { "dump"    , dump              },
+    { "cd"      , shell_cd          },
+    { "pwd"     , shell_pwd         },
+    { "export"  , shell_export      },
+    { "unset"   , shell_unset       },
+    { "echo"    , shell_echo        },
+    { "type"    , shell_type        },
 };
 
 int builtins_count = sizeof(builtins)/sizeof(struct builtin_s);

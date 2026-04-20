@@ -1,6 +1,7 @@
 /* 
  *    Programmed By: Mohammed Isam [mohammed_isam1984@yahoo.com]
  *    Copyright 2020 (c)
+ *    Refactored for safety and maintainability
  * 
  *    file: executor.c
  *    This file is part of the "Let's Build a Linux Shell" tutorial.
@@ -29,6 +30,9 @@
 #include "shell.h"
 #include "node.h"
 #include "executor.h"
+#include "constants.h"
+#include "error.h"
+#include "utils.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -38,109 +42,101 @@
 #endif
 
 
-char *search_path(char *file)
+/**
+ * Search for a command in the PATH environment variable
+ * Returns allocated path string if found, NULL otherwise
+ */
+char *search_path(const char *file)
 {
-    char *PATH = getenv("PATH");
-    char *p    = PATH;
-    char *p2;
-    
-    while(p && *p)
-    {
-        p2 = p;
-
-        while(*p2 && *p2 != PATHSEP)
-        {
-            p2++;
-        }
-        
-	int  plen = p2-p;
-        if(!plen)
-        {
-            plen = 1;
-        }
-        
-        int  alen = strlen(file);
-        char path[plen+1+alen+1];
-        
-	strncpy(path, p, p2-p);
-        path[p2-p] = '\0';
-        
-	if(p2[-1] != '/')
-        {
-            strcat(path, "/");
-        }
-
-        strcat(path, file);
-        
-	struct stat st;
-        if(stat(path, &st) == 0)
-        {
-            if(!S_ISREG(st.st_mode))
-            {
-                errno = ENOENT;
-                p = p2;
-                if(*p2 == PATHSEP)
-                {
-                    p++;
-                }
-                continue;
-            }
-
-            p = malloc(strlen(path)+1);
-            if(!p)
-            {
-                return NULL;
-            }
-            
-	    strcpy(p, path);
-            return p;
-        }
-        else    /* file not found */
-        {
-            p = p2;
-            if(*p2 == PATHSEP)
-            {
-                p++;
-            }
-        }
+    if (!file || !*file) {
+        errno = ENOENT;
+        return NULL;
     }
-
-    errno = ENOENT;
-    return NULL;
+    
+    const char *PATH = getenv("PATH");
+    if (!PATH || !*PATH) {
+        errno = ENOENT;
+        return NULL;
+    }
+    
+    /* Create a working copy of PATH since strtok modifies it */
+    char *path_copy = shell_strdup_bounded(PATH, MAX_PATH_COMPONENT * 10);
+    if (!path_copy) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    
+    char *result = NULL;
+    char full_path[MAX_PATH_COMPONENT + 1];
+    
+    char *saveptr;
+    char *dir = strtok_r(path_copy, ":", &saveptr);
+    
+    while (dir) {
+        /* Skip empty path components */
+        if (!*dir) {
+            dir = strtok_r(NULL, ":", &saveptr);
+            continue;
+        }
+        
+        /* Build the full path - use snprintf for safety */
+        int chars_written = snprintf(full_path, sizeof(full_path), 
+                                     "%s/%s", dir, file);
+        
+        /* Check for buffer overflow */
+        if (chars_written < 0 || chars_written >= (int)sizeof(full_path)) {
+            SHELL_WARN("path component too long: %s", dir);
+            dir = strtok_r(NULL, ":", &saveptr);
+            continue;
+        }
+        
+        /* Check if file exists and is executable */
+        if (is_executable(full_path)) {
+            result = shell_strdup_bounded(full_path, MAX_PATH_COMPONENT);
+            break;
+        }
+        
+        dir = strtok_r(NULL, ":", &saveptr);
+    }
+    
+    free(path_copy);
+    
+    if (!result) {
+        errno = ENOENT;
+    }
+    
+    return result;
 }
 
 
+/**
+ * Execute a command by finding it in PATH and calling execv
+ */
 int do_exec_cmd(int argc, char **argv)
 {
-    if(strchr(argv[0], '/'))
-    {
-        execv(argv[0], argv);
+    if (!argv || !argv[0]) {
+        SHELL_ERROR("do_exec_cmd: invalid arguments");
+        return 0;
     }
-    else
-    {
-        char *path = search_path(argv[0]);
-        if(!path)
-        {
+    
+    char *path_to_exec = argv[0];
+    
+    /* If argv[0] contains a path separator, use it directly */
+    if (has_path_separator(argv[0])) {
+        execv(argv[0], argv);
+    } else {
+        /* Search for command in PATH */
+        path_to_exec = search_path(argv[0]);
+        if (!path_to_exec) {
+            SHELL_ERROR("command not found: %s", argv[0]);
             return 0;
         }
-        execv(path, argv);
-        free(path);
+        
+        execv(path_to_exec, argv);
+        free(path_to_exec);
     }
+    
     return 0;
-}
-
-
-static inline void free_argv(int argc, char **argv)
-{
-    if(!argc)
-    {
-        return;
-    }
-
-    while(argc--)
-    {
-        free(argv[argc]);
-    }
 }
 
 
@@ -211,7 +207,7 @@ int do_simple_command(struct node_s *node)
         if(strcmp(argv[0], builtins[i].name) == 0)
         {
             builtins[i].func(argc, argv);
-            free_buffer(argc, argv);
+            free_argv(argc, argv);
             return 1;
         }
     }
@@ -219,34 +215,48 @@ int do_simple_command(struct node_s *node)
 #ifdef _WIN32
     STARTUPINFO si = { sizeof(STARTUPINFO) };
     PROCESS_INFORMATION pi;
-    char cmdline[4096] = "";
+    char cmdline[MAX_CMDLINE_BUFFER] = "";
+    
+    /* Build command line safely */
     for(int i = 0; i < argc; i++) {
-        if(i > 0) strcat(cmdline, " ");
-        strcat(cmdline, argv[i]);
+        if(i > 0) {
+            if (shell_strlcat(cmdline, " ", sizeof(cmdline)) != 0) {
+                SHELL_ERROR("command line too long for Windows execution");
+                free_argv(argc, argv);
+                return 0;
+            }
+        }
+        if (shell_strlcat(cmdline, argv[i], sizeof(cmdline)) != 0) {
+            SHELL_ERROR("command line too long for Windows execution");
+            free_argv(argc, argv);
+            return 0;
+        }
     }
+    
     if(!CreateProcess(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        fprintf(stderr, "ashell error: failed to create process\n");
-        free_buffer(argc, argv);
+        SHELL_ERROR("failed to create process");
+        free_argv(argc, argv);
         return 0;
     }
+    
     WaitForSingleObject(pi.hProcess, INFINITE);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    free_buffer(argc, argv);
+    free_argv(argc, argv);
     return 1;
 #else
     pid_t child_pid = 0;
     if((child_pid = fork()) == 0)
     {
         do_exec_cmd(argc, argv);
-        fprintf(stderr, "ashell error: failed to execute command: %s\n", strerror(errno));
+        SHELL_PERROR("failed to execute command");
         if(errno == ENOEXEC)
         {
-            exit(126);
+            exit(SHELL_EX_NOEXEC);
         }
         else if(errno == ENOENT)
         {
-            exit(127);
+            exit(SHELL_EX_NOTFOUND);
         }
         else
         {
@@ -255,14 +265,14 @@ int do_simple_command(struct node_s *node)
     }
     else if(child_pid < 0)
     {
-        fprintf(stderr, "ashell error: failed to fork command: %s\n", strerror(errno));
-	free_buffer(argc, argv);
+        SHELL_PERROR("failed to fork command");
+        free_argv(argc, argv);
         return 0;
     }
 
     int status = 0;
     waitpid(child_pid, &status, 0);
-    free_buffer(argc, argv);
+    free_argv(argc, argv);
     
     return 1;
 #endif
