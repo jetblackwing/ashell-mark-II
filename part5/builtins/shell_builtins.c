@@ -18,6 +18,10 @@
 #include "../shell.h"
 #include "../error.h"
 #include "../utils.h"
+#include "../symtab/symtab.h"
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <errno.h>
 
 /**
  * Built-in: cd - Change directory
@@ -195,5 +199,46 @@ int shell_type(int argc, char **argv)
         }
     }
     
+    return 0;
+}
+
+/*
+ * Built-in: saveconfig - write minimal shell configuration (PS1, PS2)
+ * Usage: saveconfig
+ */
+int shell_saveconfig(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+
+    const char *confdir = "../config";
+    const char *confpath = "../config/shell.conf";
+
+    struct stat st;
+    if (stat(confdir, &st) != 0) {
+        if (mkdir(confdir, 0755) != 0) {
+            SHELL_PERROR("saveconfig: cannot create config directory '%s'", confdir);
+            return 1;
+        }
+    }
+
+    FILE *f = fopen(confpath, "w");
+    if (!f) {
+        SHELL_PERROR("saveconfig: cannot open config file '%s' for writing", confpath);
+        return 1;
+    }
+
+    struct symtab_entry_s *entry;
+
+    entry = get_symtab_entry("PS1");
+    if (entry && entry->val) {
+        fprintf(f, "PS1=%s\n", entry->val);
+    }
+
+    entry = get_symtab_entry("PS2");
+    if (entry && entry->val) {
+        fprintf(f, "PS2=%s\n", entry->val);
+    }
+
+    fclose(f);
     return 0;
 }

@@ -32,6 +32,7 @@ struct builtin_s builtins[] =
     { "unset"   , shell_unset       },
     { "echo"    , shell_echo        },
     { "type"    , shell_type        },
+    { "saveconfig", shell_saveconfig }
 };
 
 int builtins_count = sizeof(builtins)/sizeof(struct builtin_s);
