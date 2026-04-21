@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dir: [part2-3, part4, part5]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Build project part
+        working-directory: ${{ matrix.dir }}
+        run: |
+          echo "Building $PWD"
+          if [ -f Makefile ]; then
+            make
+          elif [ -f compile.sh ]; then
+            chmod +x compile.sh
+            ./compile.sh
+          else
+            echo "No Makefile or compile.sh found in $(pwd)"
+            exit 0
+          fi
